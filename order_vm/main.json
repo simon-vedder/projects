@@ -1,0 +1,433 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "storageAccountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name des Speicherkontos. Muss zwischen 3 und 24 Zeichen lang sein und nur Kleinbuchstaben und Zahlen enthalten."
+      }
+    },
+    "queueName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name der Warteschlange, die erstellt werden soll und von der Logic App verwendet wird."
+      },
+      "defaultValue": "vmorderqueue"
+    },
+    "proxyLogicAppName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name der Proxy Logic App."
+      },
+      "defaultValue": "LogicApp-SaveOrderToQueue"
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Standort für die Ressourcen."
+      }
+    }
+  },
+  "variables": {
+    "commonTags": {
+            "Author": "Simon Vedder",
+            "Contact": "info@simonvedder.com",
+            "Project": "VMOrder",
+            "ManagedBy": "ARMTemplate"
+        }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "networkAcls": {
+          "bypass": "AzureServices",
+          "virtualNetworkRules":[],
+          "ipRules": [],
+          "defaultAction": "Allow"
+        },
+        "allowBlobPublicAccess": true,
+        "minimumTlsVersion": "TLS1_2"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
+      "apiVersion": "2024-01-01",
+      "name": "[concat(parameters('storageAccountName'), '/default/', parameters('queueName'))]",
+      "tags": "[variables('commonTags')]",
+      "dependsOn": [
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+          "metadata": {
+          }
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2024-01-01",
+      "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', concat('app-package-', 'functionappcreatedeployment'))]",
+      "tags": "[variables('commonTags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices",
+      "tags": "[variables('commonTags')]",
+      "apiVersion": "2024-01-01",
+      "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/connections",
+      "tags": "[variables('commonTags')]",
+      "apiVersion": "2016-06-01",
+      "name": "azurequeues-connection",
+      "kind": "V1",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+        "api": {
+          "id": "[format('{0}/providers/Microsoft.Web/locations/{1}/managedApis/azurequeues', subscription().id, resourceGroup().location)]",
+          "name": "azurequeues",
+          "type" : "Microsoft.Web/locations/managedApis"
+        },
+        "parameterValueSet": {
+            "name": "managedIdentityAuth",
+            "values": {}
+        },
+        "displayName": "Azure Queues Connection for Logic App"
+      }
+    },
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('proxyLogicAppName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+        "[resourceId('Microsoft.Web/connections', 'azurequeues-connection')]"
+      ],
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "$connections": { "defaultValue": {}, "type": "Object" }
+          },
+          "triggers": {
+            "When_a_HTTP_request_is_received": {
+              "type": "Request",
+              "kind": "Http",
+              "inputs": {
+                "method": "POST",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "upn": { "type": "string" }, "vmType": { "type": "string" }, "vmSize": { "type": "string" },
+                    "avd": { "type": "boolean" }, "publicIp": { "type": "boolean" }, "adJoin": { "type": "boolean" },
+                    "entraExt": { "type": "boolean" }, "os": { "type": "string" }, "application": { "type": "string" },
+                    "loadBalancerType": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "actions": {
+            "Parse_JSON_Order_Request": {
+              "runAfter": {},
+              "type": "ParseJson",
+              "inputs": {
+                "content": "@triggerBody()",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "upn": { "type": "string" }, "vmType": { "type": "string" }, "vmSize": { "type": "string" },
+                    "avd": { "type": "boolean" }, "publicIp": { "type": "boolean" }, "adJoin": { "type": "boolean" },
+                    "entraExt": { "type": "boolean" }, "os": { "type": "string" }, "application": { "type": "string" },
+                    "loadBalancerType": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "Validate_UPN_in_Entra_ID": {
+              "runAfter": {
+                "Parse_JSON_Order_Request": ["Succeeded"]
+              },
+              "type": "Http",
+              "inputs": {
+                "method": "GET",
+                "uri": "https://graph.microsoft.com/v1.0/users/@{body('Parse_JSON_Order_Request')?['upn']}",
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://graph.microsoft.com"
+                }
+              }
+            },
+            "Condition_UPN_Exists": {
+              "runAfter": {
+                "Validate_UPN_in_Entra_ID": [
+                  "Succeeded",
+                  "Failed"
+                  ]
+              },
+              "type": "If",
+              "expression": "@equals(outputs('Validate_UPN_in_Entra_ID')?['statusCode'], 200)",
+              "actions": {
+                "Send_message_to_Queue": {
+                  "runAfter": {},
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "host": {
+                      "connection": {
+                        "name": "@parameters('$connections')['azurequeues']['connectionId']"
+                      }
+                    },
+                    "method": "post",
+                    "path": "[concat('/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent(''', parameters('storageAccountName'), '''))}/queues/@{encodeURIComponent(''', parameters('queueName'), ''')}/messages')]",
+                    "body": "@json(string(body('Parse_JSON_Order_Request')))"
+                  }
+                },
+                "Response_Success": {
+                  "type": "Response",
+                  "inputs": {
+                    "statusCode": 200,
+                    "body": "UPN erfolgreich validiert und Bestellung zur Verarbeitung an die Warteschlange gesendet."
+                  },
+                  "runAfter": {
+                    "Send_message_to_Queue": ["Succeeded"]
+                  }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Response_UPN_Not_Found": {
+                    "type": "Response",
+                    "inputs": {
+                      "statusCode": 400,
+                      "body": "Der angegebene UPN konnte nicht in Entra ID gefunden werden. Bitte überprüfen Sie die Eingabe."
+                    },
+                    "runAfter": {}
+                  },
+                  "Terminate": {
+                      "runAfter": {
+                          "Response_UPN_Not_Found": [
+                              "Succeeded"
+                          ]
+                      },
+                      "type": "Terminate",
+                      "inputs": {
+                          "runStatus": "Failed",
+                          "runError": {
+                              "code": "1",
+                              "message": "UPN Not Found"
+                          }
+                      }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "azurequeues": {
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', resourceGroup().location, 'azurequeues')]",
+                "connectionId": "[resourceId('Microsoft.Web/connections', 'azurequeues-connection')]",
+                "connectionName": "azurequeues-connection",
+                "connectionProperties": {
+                  "authentication": {
+                    "type": "ManagedServiceIdentity"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "ServerFarm-CreateDeployment",
+      "tags": "[variables('commonTags')]",
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2024-04-01",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "Y1",
+        "capacity": 0,
+        "tier": "Dynamic"
+      },
+      "properties": {
+        "name": "ServerFarm-CreateDeployment",
+        "zoneRedundant": false,
+        "targetWorkerCount": 0,
+        "targetWorkerSizeId": 0,
+        "maximumElasticWorkerCount": 1,
+        "elasticScaleEnabled": false,
+        "perSiteScaling": false,
+        "reserved": false
+      }
+    },
+    {
+      "name": "FunctionApp-CreateDeployment",
+      "tags": "[variables('commonTags')]",
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2024-04-01",
+      "location": "[resourceGroup().location]",
+      "kind": "functionapp",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', 'ServerFarm-CreateDeployment')]",
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', 'ServerFarm-CreateDeployment')]",
+        "siteConfig": {
+          "appSettings": [
+            {
+              "name": "AzureWebJobsDashboard",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')),'2015-05-01-preview').key1)]"
+            },
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')),'2015-05-01-preview').key1)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')),'2015-05-01-preview').key1)]"
+            },
+            {
+              "name": "[concat(parameters('storageAccountName'), '__queueServiceUri')]",
+              "value": "[concat('https://', parameters('storageAccountName'), '.queue.core.windows.net')]"
+            },
+            {
+              "name": "WEBSITE_CONTENTSHARE",
+              "value": "[toLower('FunctionApp-CreateDeployment')]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~4"
+            },
+            {
+              "name": "keyVaultName",
+              "value": ""
+            },
+            {
+              "name": "resourceGroupName",
+              "value": ""
+            },
+            {
+              "name": "avdHostPoolName",
+              "value": ""
+            },
+            {
+              "name": "vnetName",
+              "value": ""
+            },
+            {
+              "name": "subnetName",
+              "value": ""
+            },
+            {
+              "name": "vmPrefix",
+              "value": ""
+            },
+            {
+              "name": "domainName",
+              "value": ""
+            },
+            {
+              "name": "domainUserName",
+              "value": ""
+            },
+            {
+              "name": "adminUsername",
+              "value": ""
+            },
+            {
+              "name": "ouPath",
+              "value": ""
+            },
+            {
+              "name": "QueueName",
+              "value": "[parameters('queueName')]"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME",
+              "value": "powershell"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "tags": "[variables('commonTags')]",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(parameters('storageAccountName'), 'FunctionApp-CreateDeployment', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')]",
+      "scope": "[concat('Microsoft.Storage/storageAccounts', '/', parameters('storageAccountName'))]",
+      "properties": {
+        "roleDefinitionId": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', 'FunctionApp-CreateDeployment'), '2024-04-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"    
+      },
+      "dependsOn": [
+          "[resourceId('Microsoft.Web/sites','FunctionApp-CreateDeployment')]",
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "tags": "[variables('commonTags')]",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(parameters('storageAccountName'), parameters('proxyLogicAppName'), '974c5e8b-45b9-4653-ba55-5f855dd0fb88')]",
+      "scope": "[concat('Microsoft.Storage/storageAccounts', '/', parameters('storageAccountName'))]",
+      "properties": {
+        "roleDefinitionId": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')]",
+        "principalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('proxyLogicAppName')), '2019-05-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"    
+      },
+      "dependsOn": [
+          "[resourceId('Microsoft.Logic/workflows',parameters('proxyLogicAppName'))]",
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "proxyLogicAppEndpoint": {
+      "type": "string",
+      "value": "[listCallbackUrl(resourceId('Microsoft.Logic/workflows/triggers', parameters('proxyLogicAppName'), 'When_a_HTTP_request_is_received'), '2017-07-01').value]"
+    },
+    "storageAccountNameDeployed": {
+      "type": "string",
+      "value": "[parameters('storageAccountName')]"
+    },
+    "queueNameDeployed": {
+      "type": "string",
+      "value": "[parameters('queueName')]"
+    }
+  }
+}

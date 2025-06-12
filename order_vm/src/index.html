@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VM-Bestellformular</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .form-input {
+            @apply mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm;
+        }
+        .form-checkbox {
+            @apply h-4 w-4 text-blue-600 border-gray-300 rounded;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+        <h2 class="text-3xl font-bold text-gray-800 mb-6 text-center">Neue VM bestellen</h2>
+        <form id="vmOrderForm" class="space-y-4">
+            <div>
+                <label for="upn" class="block text-sm font-medium text-gray-700">UPN (Benutzerprinzipalname)</label>
+                <input type="email" id="upn" name="upn" required class="form-input rounded-md">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">VM-Typ</label>
+                <div class="mt-2 space-y-2">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="vmType" value="standard" class="form-checkbox" checked>
+                        <span class="ml-2 text-gray-700">Standard VM</span>
+                    </label>
+                    <label class="inline-flex items-center ml-6">
+                        <input type="radio" name="vmType" value="avd" class="form-checkbox">
+                        <span class="ml-2 text-gray-700">Azure Virtual Desktop VM</span>
+                    </label>
+                </div>
+            </div>
+
+            <div id="applicationField">
+                <label for="application" class="block text-sm font-medium text-gray-700">Applikation (für Standard VM)</label>
+                <input type="text" id="application" name="application" class="form-input rounded-md">
+            </div>
+
+            <div>
+                <label for="vmSize" class="block text-sm font-medium text-gray-700">VM-Grösse</label>
+                <select id="vmSize" name="vmSize" required class="form-input rounded-md">
+                    <option value="">Bitte auswählen</option>
+                    <option value="Standard_B2s">Standard_B2s (2 vCPU, 4 GiB RAM)</option>
+                    <option value="Standard_B4ms">Standard_B4ms (4 vCPU, 16 GiB RAM)</option>
+                    <option value="Standard_D2s_v3">Standard_D2s_v3 (2 vCPU, 8 GiB RAM)</option>
+                    <option value="Standard_D4s_v3">Standard_D4s_v3 (4 vCPU, 16 GiB RAM)</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="os" class="block text-sm font-medium text-gray-700">Betriebssystem</label>
+                <select id="os" name="os" required class="form-input rounded-md">
+                    <!-- Options will be dynamically loaded by JavaScript -->
+                </select>
+            </div>
+
+            <div class="flex items-center" id="publicIpContainer">
+                <input type="checkbox" id="publicIp" name="publicIp" class="form-checkbox rounded-md">
+                <label for="publicIp" class="ml-2 text-sm font-medium text-gray-700">Öffentliche IP-Adresse</label>
+            </div>
+
+            <div class="flex items-center">
+                <input type="checkbox" id="adJoin" name="adJoin" class="form-checkbox rounded-md">
+                <label for="adJoin" class="ml-2 text-sm font-medium text-gray-700">Active Directory Domänen-Join</label>
+            </div>
+
+            <div class="flex items-center">
+                <input type="checkbox" id="entraExt" name="entraExt" class="form-checkbox rounded-md">
+                <label for="entraExt" class="ml-2 text-sm font-medium text-gray-700">Entra ID Login-Erweiterung</label>
+            </div>
+
+            <div>
+                <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 rounded-md">
+                    VM bestellen
+                </button>
+            </div>
+
+            <div id="responseMessage" class="mt-4 p-3 text-center text-sm font-medium rounded-md" style="display:none;"></div>
+        </form>
+    </div>
+
+    <script>
+        // ERSETZEN SIE DIES MIT DEM TATSÄCHLICHEN ENDPUNKT IHRER PROXY LOGIC APP!
+        // Diesen Wert erhalten Sie aus dem 'proxyLogicAppEndpoint'-Output Ihres ARM-Deployments.
+        const LOGIC_APP_ENDPOINT = 'IHRE_PROXY_LOGIC_APP_HTTP_ENDPUNKT_HIER_EINSETZEN'; // Beispiel: https://prod-xx.centralus.logic.azure.com:443/workflows/.../triggers/manual/paths/invoke?...
+
+        const form = document.getElementById('vmOrderForm');
+        const responseMessage = document.getElementById('responseMessage');
+        const vmTypeRadios = document.querySelectorAll('input[name="vmType"]');
+        const applicationField = document.getElementById('applicationField');
+        const applicationInput = document.getElementById('application');
+        const osSelect = document.getElementById('os');
+        const publicIpCheckbox = document.getElementById('publicIp');
+        const publicIpContainer = document.getElementById('publicIpContainer'); // Container für die Public IP Checkbox
+
+        const osOptions = {
+            standard: [
+                { value: 'windows11', text: 'Windows 11 Enterprise' },
+                { value: 'windows2022', text: 'Windows Server 2022 Datacenter' },
+                { value: 'windows2025', text: 'Windows Server 2025 Datacenter' }
+            ],
+            avd: [
+                { value: 'windows11', text: 'Windows 11 Enterprise' } // Nur noch Windows 11 für AVD Personal
+            ]
+        };
+
+        // Funktion zur Aktualisierung der Formularfelder basierend auf dem ausgewählten VM-Typ
+        function updateFormFields() {
+            const selectedVmType = document.querySelector('input[name="vmType"]:checked').value;
+
+            // Anwendungsfeld Sichtbarkeit und Erforderlichkeit
+            if (selectedVmType === 'standard') {
+                applicationField.style.display = 'block';
+                applicationInput.setAttribute('required', 'required');
+            } else {
+                applicationField.style.display = 'none';
+                applicationInput.removeAttribute('required');
+                applicationInput.value = ''; // Wert leeren, wenn nicht relevant
+            }
+
+            // OS-Optionen aktualisieren
+            osSelect.innerHTML = '<option value="">Bitte auswählen</option>'; // Vorhandene Optionen leeren
+            const currentOsOptions = osOptions[selectedVmType];
+            currentOsOptions.forEach(optionData => {
+                const option = document.createElement('option');
+                option.value = optionData.value;
+                option.textContent = optionData.text;
+                osSelect.appendChild(option);
+            });
+            osSelect.value = ''; // Ausgewählte OS-Option zurücksetzen
+
+            // Public IP Checkbox Sichtbarkeit und Zustand
+            if (selectedVmType === 'avd') {
+                publicIpContainer.style.display = 'none'; // Ganze Zeile ausblenden
+                publicIpCheckbox.checked = false; // Sicherstellen, dass es deaktiviert ist
+                publicIpCheckbox.disabled = true; // Deaktivieren
+            } else {
+                publicIpContainer.style.display = 'flex'; // Zeile anzeigen
+                publicIpCheckbox.disabled = false; // Aktivieren
+            }
+        }
+
+        // Listener für Änderungen am VM-Typ
+        vmTypeRadios.forEach(radio => {
+            radio.addEventListener('change', updateFormFields);
+        });
+
+        // Initialer Aufruf bei Seitenladung
+        updateFormFields();
+
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault(); // Standard-Formularübermittlung verhindern
+
+            responseMessage.style.display = 'none'; // Alte Nachrichten ausblenden
+            responseMessage.className = 'mt-4 p-3 text-center text-sm font-medium rounded-md'; // Klassen zurücksetzen
+
+            // Sammeln der Formulardaten
+            const formData = new FormData(form);
+            const data = {};
+            formData.forEach((value, key) => {
+                // Checkboxen als boolesche Werte behandeln
+                if (form.elements[key].type === 'checkbox') {
+                    data[key] = form.elements[key].checked;
+                } else if (key === 'vmType' && value === 'avd') {
+                    // Für AVD, loadBalancerType leer lassen oder entfernen, da es personal ist
+                    data[key] = value;
+                }
+                else {
+                    data[key] = value;
+                }
+            });
+
+            // Spezifische Logik für AVD: Anwendungsfeld entfernen, Public IP erzwingen auf false
+            if (data.vmType === 'avd') {
+                delete data.application; // Anwendungsfeld ist für AVD nicht relevant
+                data.publicIp = false; // Public IP ist für AVD nicht erlaubt
+            }
+
+            console.log('Sending data:', data);
+
+            try {
+                const response = await fetch(LOGIC_APP_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                let responseText = await response.text();
+                try {
+                    // Versuche, als JSON zu parsen, falls die Antwort JSON ist
+                    const jsonResponse = JSON.parse(responseText);
+                    responseText = jsonResponse.message || JSON.stringify(jsonResponse, null, 2); // Verwende 'message' oder den Stringify-Output
+                } catch (e) {
+                    // Wenn kein JSON, dann ist es einfach Text, verwende responseText direkt
+                }
+
+                if (response.ok) {
+                    responseMessage.textContent = responseText || "Bestellung erfolgreich übermittelt.";
+                    responseMessage.classList.add('bg-green-100', 'text-green-800');
+                    form.reset(); // Formular zurücksetzen bei Erfolg
+                    updateFormFields(); // Felder nach dem Reset aktualisieren, um die korrekten Anfangszustände zu zeigen
+                } else {
+                    responseMessage.textContent = responseText || "Fehler beim Senden der Bestellung.";
+                    responseMessage.classList.add('bg-red-100', 'text-red-800');
+                }
+            } catch (error) {
+                console.error('Fetch error:', error);
+                responseMessage.textContent = `Netzwerkfehler oder Server nicht erreichbar: ${error.message}`;
+                responseMessage.classList.add('bg-red-100', 'text-red-800');
+            } finally {
+                responseMessage.style.display = 'block'; // Nachricht anzeigen
+            }
+        });
+    </script>
+</body>
+</html>

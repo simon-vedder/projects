@@ -1,0 +1,106 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "storageAccountName": {
+      "type": "string",
+      "defaultValue": "vmorderwebfrontend",
+      "metadata": {
+        "description": "Name of storage account"
+      }
+    },
+    "keyVaultName": {
+      "type": "string",
+      "defaultValue": "KeyVault-VMOrder",
+      "metadata": {
+        "description": "Name of key vault"
+      }
+    },
+    "VmAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Password of local VM adminuser"
+      }
+    },
+    "adJoinPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Password of domain join user"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('storageAccountName')]",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "supportsHttpsTrafficOnly": true,
+        "staticWebsite": {
+          "enabled": true,
+          "indexDocument": "index.html",
+          "errorDocument404Path": "404.html"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2022-07-01",
+      "name": "[parameters('keyVaultName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "tenantId": "[subscription().tenantId]",
+        "enabledForTemplateDeployment":true,
+        "enableRbacAuthorization": true,
+        "networkAcls": {
+            "value": {
+                "defaultAction": "allow",
+                "bypass": "AzureServices",
+                "ipRules": [],
+                "virtualNetworkRules": []
+            }
+        }
+      }
+    },
+    {
+        "type": "Microsoft.KeyVault/vaults/secrets",
+        "apiVersion": "2024-11-01",
+        "name": "[concat(parameters('keyVaultName'), '/VmAdminPassword')]",
+        "properties": {
+            "attributes": {
+                "enabled": true
+            },
+            "contentType": "text/plain",
+            "value": "[parameters('VmAdminPassword')]"
+        },
+        "dependsOn": [
+            "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+        ]
+    },
+        {
+        "type": "Microsoft.KeyVault/vaults/secrets",
+        "apiVersion": "2024-11-01",
+        "name": "[concat(parameters('keyVaultName'), '/adJoinPassword')]",
+        "properties": {
+            "attributes": {
+                "enabled": true
+            },
+            "contentType": "text/plain",
+            "value": "[parameters('adJoinPassword')]"
+        },
+        "dependsOn": [
+            "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+        ]
+
+    }
+  ]
+}
