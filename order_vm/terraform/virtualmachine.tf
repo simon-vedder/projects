@@ -1,10 +1,12 @@
+#VirtualMachines
+#Resources: ResourceGroup, AVD Hostpool, Vnet, Subnet
+#Info: These resources are required to run a VM / AVD
 
 resource "azurerm_resource_group" "virtualmachines" {
   location = local.location
   name = local.virtualmachinesRGName
 }
 
-#virtualmachines
 resource "azurerm_virtual_desktop_host_pool" "vm" {
   name = local.hostpoolName
   location = azurerm_resource_group.virtualmachines.location

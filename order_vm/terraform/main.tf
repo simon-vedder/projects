@@ -1,6 +1,7 @@
-# Create Resource Groups
-# Create Resources (logic app via arm, function app maybe via zip)
-# role assignments
+#Automation 
+#Resources: Storage Account for Queue and FunctionApp, API Connection, Logic App with Trigger & Workflow as Custom Deployment
+#FunctionApp and ServicePlan, ZIP Content and Upload
+
 data "azurerm_client_config" "current" {}
 data "azurerm_subscription" "current" {}
 
@@ -9,10 +10,7 @@ resource "azurerm_resource_group" "automation" {
     name = local.automationRGName
 }
 
-
-#automations
-
-# 1. Azure Storage Account
+# Storage Account for Queue and FunctionApp
 resource "azurerm_storage_account" "main" {
   name                     = local.queueStorageAccountName
   resource_group_name      = azurerm_resource_group.automation.name
@@ -33,20 +31,18 @@ resource "azurerm_storage_account" "main" {
   tags = local.tags
 }
 
-# 2. Azure Storage Queue
 resource "azurerm_storage_queue" "order_queue" {
   name                = local.queueName
   storage_account_name = azurerm_storage_account.main.name
 }
 
-# 3. Azure Storage Blob Container for Function App packages
 resource "azurerm_storage_container" "app_package" {
   name                  = "app-package-functionappcreatedeployment"
   storage_account_name  = azurerm_storage_account.main.name
   container_access_type = "private" 
 }
 
-# 4. Azure API Connection for Azure Queues
+# API Connection for Azure Queues
 resource "azapi_resource" "msi-apiconnection" {
   type                      = "Microsoft.Web/connections@2016-06-01"
   name                      = "azurequeues_connection"
@@ -72,7 +68,7 @@ resource "azapi_resource" "msi-apiconnection" {
   tags = local.tags
 }
 
-# 5. Azure Logic App Workflow
+# Azure Logic App Workflow
 resource "azurerm_logic_app_workflow" "proxy_logic_app" {
   name                = local.proxyLogicAppName
   resource_group_name = azurerm_resource_group.automation.name
@@ -88,7 +84,7 @@ resource "azurerm_logic_app_workflow" "proxy_logic_app" {
   
 } 
 
-#Http trigger - needed for callback url
+# Logic App HTTP Trigger
 resource "azurerm_logic_app_trigger_http_request" "this" {
   name         = "When_a_HTTP_request_is_received"
   logic_app_id = azurerm_logic_app_workflow.proxy_logic_app.id
@@ -101,10 +97,12 @@ resource "azurerm_logic_app_trigger_http_request" "this" {
   }
 }
 
+# LogicApp Logic as ARM Template
 data "http" "remote_template" {
-  url = "https://raw.githubusercontent.com/simon-vedder/projects/refs/heads/solution/terraform/order_vm/terraform/logicapp-saveordertoqueue.json"
+  url = "https://raw.githubusercontent.com/simon-vedder/projects/refs/heads/main/order_vm/terraform/logicapp-saveordertoqueue.json"
 }
 
+# Start Custom Deployment
 resource "azurerm_resource_group_template_deployment" "logicapp-content" {
   name                = "${local.proxyLogicAppName}-${formatdate("YYYYMMDD-HHmmss", timestamp())}"
   resource_group_name = azurerm_resource_group.automation.name
@@ -125,7 +123,7 @@ resource "azurerm_resource_group_template_deployment" "logicapp-content" {
   }
 }
 
-# 6. Azure App Service Plan (for Function App)
+# App Service Plan (for Function App)
 resource "azurerm_service_plan" "function_app_plan" {
   name                = "${local.functionAppName}-ServicePlan"
   resource_group_name = azurerm_resource_group.automation.name
@@ -136,13 +134,14 @@ resource "azurerm_service_plan" "function_app_plan" {
   tags = local.tags
 }
 
-# 7. Azure Function App
+# ZIP Code Files
 data "archive_file" "function_package" {  
   type = "zip"  
   source_dir = "${path.module}/../src/run/" 
   output_path = "function.zip"
 }
 
+# Azure Function App and Upload ZIP 
 resource "azurerm_windows_function_app" "create_deployment_function_app" {
   name                       = local.functionAppName
   resource_group_name = azurerm_resource_group.automation.name
@@ -151,7 +150,8 @@ resource "azurerm_windows_function_app" "create_deployment_function_app" {
   storage_account_name       = azurerm_storage_account.main.name
   storage_account_access_key = azurerm_storage_account.main.primary_access_key
 
-  zip_deploy_file = data.archive_file.function_package.output_path
+  zip_deploy_file = data.archive_file.function_package.output_path #ZIP Upload
+
   site_config {}
   identity {
     type = "SystemAssigned"

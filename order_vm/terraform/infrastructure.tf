@@ -1,9 +1,13 @@
+#Infrastructure
+#Resources: ResourceGroup, Key Vault, Key Vault Secrets, Storage Account for WebFrontend, HTML Upload in Blob
+#Info: These resources are required as frontdoor and storing secrets for the deployment
+
 resource "azurerm_resource_group" "infrastructure" {
   location = local.location
   name = local.infrastructureRGName
 }
 
-#Infrastructure
+# Key Vault & Secrets
 resource "azurerm_key_vault" "infra" {
   location = azurerm_resource_group.infrastructure.location
   resource_group_name = azurerm_resource_group.infrastructure.name
@@ -26,6 +30,7 @@ resource "azurerm_key_vault_secret" "adjoinadmin" {
   key_vault_id = azurerm_key_vault.infra.id
 }
 
+# Web Frontend - Storage Account Static Website
 resource "azurerm_storage_account" "infra" {
   name = local.webStorageAccount
   location = azurerm_resource_group.infrastructure.location
@@ -42,6 +47,7 @@ resource "azurerm_storage_account" "infra" {
     index_document = "index.html"
   }
 }
+# Blob with HTML upload & LogicApp HTTP URL Input
 resource "azurerm_storage_blob" "index_html" {
   name                   = "index.html" 
   storage_account_name   = azurerm_storage_account.infra.name
