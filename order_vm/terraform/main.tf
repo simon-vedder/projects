@@ -102,7 +102,7 @@ resource "azurerm_logic_app_trigger_http_request" "this" {
 }
 
 data "http" "remote_template" {
-  url = "https://raw.githubusercontent.com/simon-vedder/projects/solution/terraform/order_vm/terraform/logicapp-saveordertoqueue.json"
+  url = "https://raw.githubusercontent.com/simon-vedder/projects/refs/heads/solution/terraform/order_vm/terraform/logicapp-saveordertoqueue.json"
 }
 
 resource "azurerm_resource_group_template_deployment" "logicapp-content" {
@@ -137,6 +137,12 @@ resource "azurerm_service_plan" "function_app_plan" {
 }
 
 # 7. Azure Function App
+data "archive_file" "function_package" {  
+  type = "zip"  
+  source_dir = "${path.module}/../src/run/" 
+  output_path = "function.zip"
+}
+
 resource "azurerm_windows_function_app" "create_deployment_function_app" {
   name                       = local.functionAppName
   resource_group_name = azurerm_resource_group.automation.name
@@ -144,6 +150,8 @@ resource "azurerm_windows_function_app" "create_deployment_function_app" {
   service_plan_id        = azurerm_service_plan.function_app_plan.id
   storage_account_name       = azurerm_storage_account.main.name
   storage_account_access_key = azurerm_storage_account.main.primary_access_key
+
+  zip_deploy_file = data.archive_file.function_package.output_path
   site_config {}
   identity {
     type = "SystemAssigned"

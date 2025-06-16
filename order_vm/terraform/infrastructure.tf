@@ -15,6 +15,17 @@ resource "azurerm_key_vault" "infra" {
   tags = local.tags
 }
 
+resource "azurerm_key_vault_secret" "localadmin" {
+  name = "VmAdminPassword"
+  value = "" #fill this manually later
+  key_vault_id = azurerm_key_vault.infra.id
+}
+resource "azurerm_key_vault_secret" "adjoinadmin" {
+  name = "adJoinPassword"
+  value = "" #fill this manually later
+  key_vault_id = azurerm_key_vault.infra.id
+}
+
 resource "azurerm_storage_account" "infra" {
   name = local.webStorageAccount
   location = azurerm_resource_group.infrastructure.location
@@ -24,22 +35,24 @@ resource "azurerm_storage_account" "infra" {
   public_network_access_enabled = true
   account_kind = "StorageV2"
   tags = local.tags
+  network_rules {
+    default_action = "Allow"
+  }
   static_website {
     index_document = "index.html"
   }
 }
 resource "azurerm_storage_blob" "index_html" {
-  name                   = "index.html" # Name of the blob in the static website container
+  name                   = "index.html" 
   storage_account_name   = azurerm_storage_account.infra.name
-  storage_container_name = "$web"       # Special container for static websites
+  storage_container_name = "$web"       
   type                   = "Block"
   content_type           = "text/html"
 
-  # Read the content of the local HTML file and replace the placeholder
-  source_content = replace(file("${path.module}/../src/index.html"), "IHRE_PROXY_LOGIC_APP_HTTP_ENDPUNKT_HIER_EINSETZEN", azurerm_logic_app_workflow.proxy_logic_app.access_endpoint)
+  source_content = replace(file("${path.module}/../src/index.html"), "IHRE_PROXY_LOGIC_APP_HTTP_ENDPUNKT_HIER_EINSETZEN", azurerm_logic_app_trigger_http_request.this.callback_url)
 
   depends_on = [
-    azurerm_storage_account.infra, # Ensure storage account is ready
-    azurerm_logic_app_workflow.proxy_logic_app # Ensure logic app is deployed and its endpoint is available
+    azurerm_storage_account.infra, 
+    azurerm_logic_app_workflow.proxy_logic_app 
   ]
 }

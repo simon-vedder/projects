@@ -10,20 +10,20 @@ locals {
 
     #automation     
     automationRGName = "VMOrderAutomation"
-    queueStorageAccountName = "vmorderstorageaccount"
-    queueName = "vmorderqueue"
-    proxyLogicAppName = "LogicApp-SaveOrderToQueue"
-    functionAppName = "FunctionApp-CreateDeployment1"
+    queueStorageAccountName = ""
+    queueName = ""
+    proxyLogicAppName = ""
+    functionAppName = ""
 
     #infrastructure
     infrastructureRGName = "VMOrderInfrastructure"
-    keyVaultName = "KeyVault-VMOrder2"
-    webStorageAccount = "vmorderwebfrontendhtml"
+    keyVaultName = ""
+    webStorageAccount = ""
 
     #virtualmachines
     virtualmachinesRGName = "VMOrderVirtualMachines"
-    hostpoolName = "Personal-HP"
-    vnetName = "VMOrder-VNet"
-    subnetName = "default"
+    hostpoolName = ""
+    vnetName = ""
+    subnetName = ""
     
 }
