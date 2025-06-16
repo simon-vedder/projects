@@ -1,0 +1,173 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "workflow_name": {
+            "defaultValue": "LogicApp-SaveOrderToQueue",
+            "type": "string"
+        },
+        "connection_name": {
+            "defaultValue": "azurequeues-connection",
+            "type": "string"
+        },
+        "storageaccount_name": {
+            "defaultValue": "",
+            "type": "string"
+        },
+        "queueName": {
+            "type": "string",
+            "defaultValue": ""
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2019-05-01",
+            "name": "[parameters('workflow_name')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                "contentVersion": "1.0.0.0",
+                "parameters": {
+                    "$connections": { "defaultValue": {}, "type": "Object" }
+                },
+                "triggers": {
+                    "When_a_HTTP_request_is_received": {
+                    "type": "Request",
+                    "kind": "Http",
+                    "inputs": {
+                        "method": "POST",
+                        "schema": {
+                        "type": "object",
+                        "properties": {
+                            "upn": { "type": "string" }, "vmType": { "type": "string" }, "vmSize": { "type": "string" },
+                            "avd": { "type": "boolean" }, "publicIp": { "type": "boolean" }, "adJoin": { "type": "boolean" },
+                            "entraExt": { "type": "boolean" }, "os": { "type": "string" }, "application": { "type": "string" },
+                            "loadBalancerType": { "type": "string" }
+                        }
+                        }
+                    }
+                    }
+                },
+                "actions": {
+                    "Parse_JSON_Order_Request": {
+                    "runAfter": {},
+                    "type": "ParseJson",
+                    "inputs": {
+                        "content": "@triggerBody()",
+                        "schema": {
+                        "type": "object",
+                        "properties": {
+                            "upn": { "type": "string" }, "vmType": { "type": "string" }, "vmSize": { "type": "string" },
+                            "avd": { "type": "boolean" }, "publicIp": { "type": "boolean" }, "adJoin": { "type": "boolean" },
+                            "entraExt": { "type": "boolean" }, "os": { "type": "string" }, "application": { "type": "string" },
+                            "loadBalancerType": { "type": "string" }
+                        }
+                        }
+                    }
+                    },
+                    "Validate_UPN_in_Entra_ID": {
+                    "runAfter": {
+                        "Parse_JSON_Order_Request": ["Succeeded"]
+                    },
+                    "type": "Http",
+                    "inputs": {
+                        "method": "GET",
+                        "uri": "https://graph.microsoft.com/v1.0/users/@{body('Parse_JSON_Order_Request')?['upn']}",
+                        "authentication": {
+                        "type": "ManagedServiceIdentity",
+                        "audience": "https://graph.microsoft.com"
+                        }
+                    }
+                    },
+                    "Condition_UPN_Exists": {
+                    "runAfter": {
+                        "Validate_UPN_in_Entra_ID": [
+                        "Succeeded",
+                        "Failed"
+                        ]
+                    },
+                    "type": "If",
+                    "expression": "@equals(outputs('Validate_UPN_in_Entra_ID')?['statusCode'], 200)",
+                    "actions": {
+                        "Send_message_to_Queue": {
+                        "runAfter": {},
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                            "connection": {
+                                "name": "@parameters('$connections')['azurequeues']['connectionId']"
+                            }
+                            },
+                            "method": "post",
+                            "path": "[concat('/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent(''', parameters('storageaccount_name'), '''))}/queues/@{encodeURIComponent(''', parameters('queueName'), ''')}/messages')]",
+                            "body": "@json(string(body('Parse_JSON_Order_Request')))"
+                        }
+                        },
+                        "Response_Success": {
+                        "type": "Response",
+                        "inputs": {
+                            "statusCode": 200,
+                            "body": "UPN erfolgreich validiert und Bestellung zur Verarbeitung an die Warteschlange gesendet."
+                        },
+                        "runAfter": {
+                            "Send_message_to_Queue": ["Succeeded"]
+                        }
+                        }
+                    },
+                    "else": {
+                        "actions": {
+                        "Response_UPN_Not_Found": {
+                            "type": "Response",
+                            "inputs": {
+                            "statusCode": 400,
+                            "body": "Der angegebene UPN konnte nicht in Entra ID gefunden werden. Bitte überprüfen Sie die Eingabe."
+                            },
+                            "runAfter": {}
+                        },
+                        "Terminate": {
+                            "runAfter": {
+                                "Response_UPN_Not_Found": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Terminate",
+                            "inputs": {
+                                "runStatus": "Failed",
+                                "runError": {
+                                    "code": "1",
+                                    "message": "UPN Not Found"
+                                }
+                            }
+                        }
+                        }
+                    }
+                    }
+                }
+                },
+                "parameters": {
+                "$connections": {
+                    "value": {
+                    "azurequeues": {
+                        "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', resourceGroup().location, 'azurequeues')]",
+                        "connectionId": "[resourceId('Microsoft.Web/connections', parameters('connection_name'))]",
+                        "connectionName": "[parameters('connection_name')]",
+                        "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                        }
+                    }
+                    }
+                }
+                }
+            }
+            }
+    ]
+}
