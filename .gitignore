@@ -38,4 +38,29 @@ terraform.rc
 
 *.zip
 
+# Ignore logs and temp files
+*.log
+*.bak
+*.tmp
+*.swp
+
+# VSCode settings folder
+.vscode/
+
+# JetBrains IDEs
+.idea/
+
+# Environment files
+.env
+
+# Python cache (if any scripts)
+__pycache__/
+
+# MacOS system files
 .DS_Store
+
+# Windows system files
+Thumbs.db
+
+# Parameter files with local overrides
+parameters/*.local.json
