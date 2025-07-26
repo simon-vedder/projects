@@ -1,0 +1,246 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "automationAccountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Automation Account"
+      }
+    },
+    "powerShellScriptUri": {
+      "type": "string",
+      "metadata": {
+        "description": "URI to the PowerShell script file (VM-PowerManagement.ps1)"
+      }
+    },
+    "timezone": {
+      "type": "string",
+      "defaultValue": "Europe/Zurich",
+      "metadata": {
+        "description": "Timezone for the schedules"
+      }
+    },
+    "startDateTime": {
+      "type": "string",
+      "defaultValue": "[dateTimeAdd(utcNow(), 'P1D')]",
+      "metadata": {
+        "description": "Start date and time for the first schedule execution"
+      }
+    }
+  },
+  "variables": {
+    "roleDefinitionName": "VM Power Manager",
+    "startScheduleName": "vm-start-schedule",
+    "stopScheduleName": "vm-stop-schedule",
+    "runbookName": "VM-PowerManagement"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Automation/automationAccounts",
+      "apiVersion": "2020-01-13-preview",
+      "name": "[parameters('automationAccountName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "sku": {
+          "name": "Basic"
+        }
+      },
+      "identity": {
+        "type": "SystemAssigned"
+      }
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/runbooks",
+      "apiVersion": "2020-01-13-preview",
+      "name": "[concat(parameters('automationAccountName'), '/', variables('runbookName'))]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+      ],
+      "properties": {
+        "runbookType": "PowerShell72",
+        "logVerbose": true,
+        "logProgress": true,
+        "description": "PowerShell runbook for VM power management",
+        "publishContentLinkFlag": true,
+        "publishContentLink": {
+            "uri": "[parameters('powerShellScriptUri')]",
+            "version": "1.0.0"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/schedules",
+      "apiVersion": "2020-01-13-preview",
+      "name": "[concat(parameters('automationAccountName'), '/', variables('startScheduleName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+      ],
+      "properties": {
+        "description": "Schedule to start VMs at 7 AM on weekdays",
+        "startTime": "[concat(substring(parameters('startDateTime'), 0, 10), 'T07:00:00Z')]",
+        "frequency": "Week",
+        "interval": 1,
+        "timeZone": "[parameters('timezone')]",
+        "advancedSchedule": {
+          "weekDays": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/schedules",
+      "apiVersion": "2020-01-13-preview",
+      "name": "[concat(parameters('automationAccountName'), '/', variables('stopScheduleName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+      ],
+      "properties": {
+        "description": "Schedule to stop VMs at 9 PM on weekdays",
+        "startTime": "[concat(substring(parameters('startDateTime'), 0, 10), 'T21:00:00Z')]",
+        "frequency": "Week",
+        "interval": 1,
+        "timeZone": "[parameters('timezone')]",
+        "advancedSchedule": {
+          "weekDays": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "roleDefinitionAndAssignment",
+      "subscriptionId": "[subscription().subscriptionId]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+      ],
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "automationAccountPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName')), '2020-01-13-preview', 'Full').identity.principalId]"
+          },
+          "customRoleDefinitionName": {
+            "value": "[variables('roleDefinitionName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "automationAccountPrincipalId": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "customRoleDefinitionName": {
+              "type": "string",
+              "defaultValue": "VM Power Manager"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleDefinitions",
+              "apiVersion": "2018-01-01-preview",
+              "name": "[guid(parameters('customRoleDefinitionName'))]",
+              "properties": {
+                "roleName": "[parameters('customRoleDefinitionName')]",
+                "description": "Custom role for VM power management with least privilege",
+                "type": "CustomRole",
+                "permissions": [
+                  {
+                    "actions": [
+                      "Microsoft.Compute/virtualMachines/read",
+                      "Microsoft.Compute/virtualMachines/write",
+                      "Microsoft.Network/networkInterfaces/join/action",
+                      "Microsoft.Compute/disks/write",
+                      "Microsoft.ManagedIdentity/userAssignedIdentities/assign/action",
+                      "Microsoft.Compute/virtualMachines/start/action",
+                      "Microsoft.Compute/virtualMachines/deallocate/action"
+                    ],
+                    "notActions": []
+                  }
+                ],
+                "assignableScopes": [
+                  "[subscription().id]"
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(subscription().id, parameters('automationAccountPrincipalId'), parameters('customRoleDefinitionName'))]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Authorization/roleDefinitions', guid(parameters('customRoleDefinitionName')))]"
+              ],
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(parameters('customRoleDefinitionName')))]",
+                "principalId": "[parameters('automationAccountPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ],
+          "outputs": {
+            "roleDefinitionId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Authorization/roleDefinitions', guid(parameters('customRoleDefinitionName')))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/jobSchedules",
+      "apiVersion": "2020-01-13-preview",
+      "name": "[concat(parameters('automationAccountName'), '/', guid(variables('startScheduleName'), variables('runbookName')))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts/runbooks', parameters('automationAccountName'), variables('runbookName'))]",
+        "[resourceId('Microsoft.Automation/automationAccounts/schedules', parameters('automationAccountName'), variables('startScheduleName'))]"
+      ],
+      "properties": {
+        "schedule": {
+          "name": "[variables('startScheduleName')]"
+        },
+        "runbook": {
+          "name": "[variables('runbookName')]"
+        },
+        "parameters": {
+          "action": "Start"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/jobSchedules",
+      "apiVersion": "2020-01-13-preview",
+      "name": "[concat(parameters('automationAccountName'), '/', guid(variables('stopScheduleName'), variables('runbookName')))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts/runbooks', parameters('automationAccountName'), variables('runbookName'))]",
+        "[resourceId('Microsoft.Automation/automationAccounts/schedules', parameters('automationAccountName'), variables('stopScheduleName'))]"
+      ],
+      "properties": {
+        "schedule": {
+          "name": "[variables('stopScheduleName')]"
+        },
+        "runbook": {
+          "name": "[variables('runbookName')]"
+        },
+        "parameters": {
+          "action": "Stop"
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "automationAccountName": {
+      "type": "string",
+      "value": "[parameters('automationAccountName')]"
+    },
+    "automationAccountPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName')), '2020-01-13-preview', 'Full').identity.principalId]"
+    }
+  }
+}
