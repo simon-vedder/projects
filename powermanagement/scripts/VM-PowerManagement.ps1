@@ -30,6 +30,14 @@
     Required Permissions:
     - Virtual Machine Contributor role on target subscriptions
     - Or Contributor role on target subscriptions
+    - Or Custom Role with the following permission:
+        "Microsoft.Compute/virtualMachines/read",
+        "Microsoft.Compute/virtualMachines/write",
+        "Microsoft.Network/networkInterfaces/join/action",
+        "Microsoft.Compute/disks/write",
+        "Microsoft.ManagedIdentity/userAssignedIdentities/assign/action",
+        "Microsoft.Compute/virtualMachines/start/action",
+        "Microsoft.Compute/virtualMachines/deallocate/action"
     
     VM Tag Controls:
     - AutoShutdown-Exclude: "true" - Permanently exclude VM from power management

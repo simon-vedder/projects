@@ -12,7 +12,8 @@
       "type": "string",
       "metadata": {
         "description": "URI to the PowerShell script file (VM-PowerManagement.ps1)"
-      }
+      },
+      "defaultValue": "https://raw.githubusercontent.com/simon-vedder/projects/refs/heads/main/powermanagement/scripts/VM-PowerManagement.ps1"
     },
     "timezone": {
       "type": "string",
