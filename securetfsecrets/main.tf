@@ -15,7 +15,7 @@ terraform {
 provider "azurerm" {
   features {
   }
-  subscription_id = "6e009161-8480-4337-ab64-574a4eed8b93"
+  subscription_id = "<subscriptionID>"
 }
 
 # Get current subscription
@@ -97,7 +97,7 @@ resource "azurerm_key_vault" "this" {
 
 resource "azurerm_role_assignment" "kv_admin" {
   scope = azurerm_key_vault.this.id
-  principal_id = "bf349f96-c84b-4693-955f-a3f581910fd4"
+  principal_id = "<userid>"
   role_definition_name = "Key Vault Administrator"
 }
 
